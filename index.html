@@ -3,357 +3,328 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Air Canvas - Fullscreen Camera & Move Text</title>
+    <title>Neon Air Canvas</title>
+    
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
 
     <style>
-        * {
-            box-sizing: border-box;
+        body {
             margin: 0;
             padding: 0;
-        }
-        body, html {
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-            background-color: #000;
+            background-color: #121212;
+            color: #ffffff;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
         }
-        #app-container {
+
+        #controls {
+            position: absolute;
+            top: 15px;
+            z-index: 10;
+            background: rgba(30, 30, 30, 0.75);
+            backdrop-filter: blur(10px);
+            padding: 12px 25px;
+            border-radius: 30px;
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        label {
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #ccc;
+        }
+
+        input[type="color"] {
+            border: none;
+            background: none;
+            width: 35px;
+            height: 35px;
+            cursor: pointer;
+        }
+
+        input[type="range"] {
+            cursor: pointer;
+            accent-color: #00ffcc;
+        }
+
+        #status {
+            font-weight: bold;
+            color: #00ffcc;
+            text-shadow: 0 0 8px rgba(0,255,204,0.6);
+            min-width: 140px;
+            text-align: center;
+        }
+
+        #canvas-container {
             position: relative;
             width: 100vw;
             height: 100vh;
         }
-        /* Fullscreen Mirrored Webcam background */
-        #webcam {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            transform: scaleX(-1); /* Mirror camera */
-            z-index: 1;
-        }
-        /* Dark overlay to make neon stand out on camera */
-        #camera-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.65);
-            z-index: 2;
-            pointer-events: none;
-        }
-        /* Drawing Canvas drawing layer */
+
+        /* Canvas layered on top of flipped webcam */
         canvas {
             position: absolute;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            z-index: 3;
+            z-index: 2;
         }
-        /* Control Panel */
-        #ui-panel {
+
+        video {
             position: absolute;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            z-index: 10;
-            background: rgba(20, 20, 20, 0.85);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            padding: 12px 24px;
-            border-radius: 50px;
-            display: flex;
-            align-items: center;
-            gap: 20px;
-            color: white;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            top: 15px;
+            right: 15px;
+            width: 200px;
+            height: 150px;
+            object-fit: cover;
+            transform: scaleX(-1); /* Mirror view */
+            border-radius: 10px;
+            border: 2px solid rgba(255,255,255,0.2);
+            z-index: 5;
+            background: #000;
         }
-        .control-group {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        label {
-            font-size: 11px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            color: #aaa;
-        }
-        input[type="color"] {
-            -webkit-appearance: none;
-            border: none;
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            cursor: pointer;
-            background: transparent;
-        }
-        input[type="color"]::-webkit-color-swatch-wrapper {
-            padding: 0;
-        }
-        input[type="color"]::-webkit-color-swatch {
-            border: 2px solid #fff;
-            border-radius: 50%;
-        }
-        input[type="range"] {
-            accent-color: #00ffcc;
-            cursor: pointer;
-        }
-        /* Status HUD */
-        #hud {
+
+        /* Quick Guide Overlay */
+        #guide {
             position: absolute;
-            top: 20px;
-            left: 20px;
-            z-index: 10;
-            color: white;
-            background: rgba(0,0,0,0.75);
+            bottom: 15px;
+            left: 15px;
+            background: rgba(0,0,0,0.6);
             padding: 15px;
-            border-radius: 8px;
-            font-size: 14px;
-            pointer-events: none;
+            border-radius: 10px;
+            font-size: 0.85rem;
             line-height: 1.5;
+            z-index: 10;
+            pointer-events: none;
             border-left: 4px solid #00ffcc;
         }
-        .active-mode {
-            font-weight: bold;
-            color: #00ffcc;
-            text-shadow: 0 0 8px #00ffcc;
-        }
+        #guide ul { margin: 5px 0 0 0; padding-left: 20px; }
     </style>
 </head>
 <body>
 
-    <div id="app-container">
-        <video id="webcam" autoplay playsinline></video>
-        <div id="camera-overlay"></div>
-        
-        <canvas id="paintCanvas"></canvas>
-    </div>
-
-    <div id="ui-panel">
+    <div id="controls">
         <div class="control-group">
-            <label for="colorPicker">Neon Color</label>
+            <label for="colorPicker">Color</label>
             <input type="color" id="colorPicker" value="#00ffcc">
         </div>
         <div class="control-group">
             <label for="brushSize">Size</label>
-            <input type="range" id="brushSize" min="5" max="50" value="15">
-            <span id="sizeValue">15px</span>
+            <input type="range" id="brushSize" min="5" max="40" value="15">
         </div>
-        <button id="clearBtn" style="background: #ff3366; color: white; border: none; padding: 6px 12px; border-radius: 20px; cursor: pointer; font-weight: bold;">Clear All</button>
+        <div id="status">Initializing...</div>
     </div>
 
-    <div id="hud">
-        <h3>Air Canvas Controls</h3>
-        <hr style="margin: 8px 0; border-color: rgba(255,255,255,0.1);">
-        <div>☝️ 1 Finger: <span id="mode-draw">Draw / Write Text</span></div>
-        <div>✋ Open Palm: <span id="mode-erase">Erase (Pro)</span></div>
-        <div>✊ Closed Fist: <span id="mode-pause">Pause Loop</span></div>
-        <div>✌️ 2 Fingers: <span id="mode-move">Move Written Text</span></div>
-        <hr style="margin: 8px 0; border-color: rgba(255,255,255,0.1);">
-        <div>Status: <span id="current-state" class="active-mode">Loading Camera...</span></div>
+    <div id="guide">
+        <strong>Gestures Guide:</strong>
+        <ul>
+            <li>👆 <strong>1 Finger (Index):</strong> Glow Draw</li>
+            <li>🖐️ <strong>Open Palm:</strong> Eraser Mode</li>
+            <li>✊ <strong>Closed Fist:</strong> Pause / Idle</li>
+            <li>✌️ <strong>2 Fingers:</strong> Move / Pan Canvas</li>
+        </ul>
+    </div>
+
+    <div id="canvas-container">
+        <video id="webcam" autoplay playsinline></video>
+        <canvas id="paintCanvas"></canvas>
     </div>
 
     <script>
         const videoElement = document.getElementById('webcam');
-        const canvas = document.getElementById('paintCanvas');
-        const ctx = canvas.getContext('2d');
-        
+        const canvasElement = document.getElementById('paintCanvas');
+        const ctx = canvasElement.getContext('2d');
+        const statusDiv = document.getElementById('status');
         const colorPicker = document.getElementById('colorPicker');
-        const brushSize = document.getElementById('brushSize');
-        const sizeValue = document.getElementById('sizeValue');
-        const clearBtn = document.getElementById('clearBtn');
-        const stateHUD = document.getElementById('current-state');
+        const brushSizeSlider = document.getElementById('brushSize');
+
+        // Drawing state Variables
+        let paths = []; // Stores all drawn lines/strokes
+        let currentPath = null;
+        let isMovingMode = false;
+        let lastMovePoint = null;
         
-        const modes = {
-            draw: document.getElementById('mode-draw'),
-            erase: document.getElementById('mode-erase'),
-            pause: document.getElementById('mode-pause'),
-            move: document.getElementById('mode-move')
-        };
-
-        // Offscreen canvas memory to hold drawings so they can be moved/manipulated
-        const drawingCanvas = document.createElement('canvas');
-        const drawingCtx = drawingCanvas.getContext('2d');
-
-        // Application Translation State
-        let lastX = null;
-        let lastY = null;
-        let offsetX = 0; // Tracks total text movement offset
+        // Canvas Translation offsets for the "2-finger Move" feature
+        let offsetX = 0;
         let offsetY = 0;
 
+        // Resize Canvas dynamically
         function resizeCanvas() {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
-            
-            // Resize internal drawing memory buffer keeping the data intact
-            const tempCanvas = document.createElement('canvas');
-            tempCanvas.width = drawingCanvas.width;
-            tempCanvas.height = drawingCanvas.height;
-            tempCanvas.getContext('2d').drawImage(drawingCanvas, 0, 0);
-            
-            drawingCanvas.width = window.innerWidth;
-            drawingCanvas.height = window.innerHeight;
-            drawingCtx.drawImage(tempCanvas, 0, 0);
-            
-            renderCombinedScene();
+            canvasElement.width = window.innerWidth;
+            canvasElement.height = window.innerHeight;
+            redrawCanvas();
         }
         window.addEventListener('resize', resizeCanvas);
-        setTimeout(resizeCanvas, 500);
+        resizeCanvas();
 
-        brushSize.addEventListener('input', (e) => {
-            sizeValue.textContent = `${e.target.value}px`;
-        });
+        // Render everything on the dark canvas
+        function redrawCanvas() {
+            // Dark Background
+            ctx.fillStyle = '#121212';
+            ctx.fillRect(0, 0, canvasElement.width, canvasElement.height);
 
-        clearBtn.addEventListener('click', () => {
-            drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
-            offsetX = 0;
-            offsetY = 0;
-            renderCombinedScene();
-        });
-
-        function updateHUD(activeModeName, statusText) {
-            stateHUD.textContent = statusText;
-            Object.keys(modes).forEach(mode => {
-                if (mode === activeModeName) {
-                    modes[mode].classList.add('active-mode');
-                } else {
-                    modes[mode].classList.remove('active-mode');
-                }
-            });
-        }
-
-        // Render main screen drawing layers accounting for global offset updates
-        function renderCombinedScene() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.save();
-            // Apply coordinates shift to simulate moving the written drawings
-            ctx.translate(offsetX, offsetY);
-            ctx.drawImage(drawingCanvas, 0, 0);
+            ctx.translate(offsetX, offsetY); // Apply panning offset
+
+            // Draw all saved paths
+            paths.forEach(path => {
+                if (path.points.length < 2) return;
+                
+                ctx.beginPath();
+                ctx.moveTo(path.points[0].x, path.points[0].y);
+                for (let i = 1; i < path.points.length; i++) {
+                    ctx.lineTo(path.points[i].x, path.points[i].y);
+                }
+                
+                ctx.lineWidth = path.size;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+
+                if (path.isEraser) {
+                    // Eraser cuts out back to background color
+                    ctx.strokeStyle = '#121212';
+                    ctx.shadowBlur = 0;
+                } else {
+                    // Neon Glow Effect
+                    ctx.strokeStyle = path.color;
+                    ctx.shadowColor = path.color;
+                    ctx.shadowBlur = path.size * 0.8;
+                }
+                ctx.stroke();
+            });
+
             ctx.restore();
         }
 
-        function onResults(results) {
-            if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
-                lastX = null;
-                lastY = null;
-                updateHUD('', 'No Hand Detected');
-                return;
-            }
-
-            const landmarks = results.multiHandLandmarks[0];
-
-            // Core landmarks
-            const indexTip = landmarks[8];
-            const indexPip = landmarks[6];
-            const middleTip = landmarks[12];
-            const middlePip = landmarks[10];
-            const ringTip = landmarks[16];
-            const pinkyTip = landmarks[20];
-
-            // Convert normalized coordinates to pixel location (with mirror inversion)
-            const cursorX = (1 - indexTip.x) * canvas.width;
-            const cursorY = indexTip.y * canvas.height;
-
-            // Gesture validation booleans
-            const isIndexExtended = indexTip.y < indexPip.y;
-            const isMiddleExtended = middleTip.y < middlePip.y;
-            const isRingExtended = ringTip.y < landmarks[14].y;
-            const isPinkyExtended = pinkyTip.y < landmarks[18].y;
-
-            let currentGesture = 'pause';
-
-            if (isIndexExtended && !isMiddleExtended && !isRingExtended && !isPinkyExtended) {
-                currentGesture = 'draw';
-            } else if (isIndexExtended && isMiddleExtended && !isRingExtended && !isPinkyExtended) {
-                currentGesture = 'move';
-            } else if (isIndexExtended && isMiddleExtended && isRingExtended && isPinkyExtended) {
-                currentGesture = 'erase';
-            } else if (!isIndexExtended && !isMiddleExtended && !isRingExtended && !isPinkyExtended) {
-                currentGesture = 'pause';
-            }
-
-            // --- PROCESS GESTURES ---
-            if (currentGesture === 'draw') {
-                updateHUD('draw', 'Writing / Drawing');
-                
-                // When drawing, calculate pointer mapping relative to the shifted text matrix canvas
-                const targetDrawX = cursorX - offsetX;
-                const targetDrawY = cursorY - offsetY;
-
-                drawingCtx.beginPath();
-                drawingCtx.globalCompositeOperation = 'source-over';
-                drawingCtx.strokeStyle = colorPicker.value;
-                drawingCtx.lineWidth = brushSize.value;
-                drawingCtx.lineCap = 'round';
-                drawingCtx.lineJoin = 'round';
-                
-                // Neon glow structure
-                drawingCtx.shadowBlur = brushSize.value * 0.8;
-                drawingCtx.shadowColor = colorPicker.value;
-
-                if (lastX !== null && lastY !== null) {
-                    drawingCtx.moveTo(lastX - offsetX, lastY - offsetY);
-                    drawingCtx.lineTo(targetDrawX, targetDrawY);
-                    drawingCtx.stroke();
-                }
-                
-                lastX = cursorX;
-                lastY = cursorY;
-                renderCombinedScene();
-
-            } else if (currentGesture === 'erase') {
-                updateHUD('erase', 'Eraser Mode Active');
-                
-                const targetEraseX = cursorX - offsetX;
-                const targetEraseY = cursorY - offsetY;
-
-                drawingCtx.beginPath();
-                drawingCtx.globalCompositeOperation = 'destination-out'; // Pro cutout structure
-                drawingCtx.lineWidth = brushSize.value * 3;
-                drawingCtx.lineCap = 'round';
-                drawingCtx.lineJoin = 'round';
-                drawingCtx.shadowBlur = 0; 
-
-                if (lastX !== null && lastY !== null) {
-                    drawingCtx.moveTo(lastX - offsetX, lastY - offsetY);
-                    drawingCtx.lineTo(targetEraseX, targetEraseY);
-                    drawingCtx.stroke();
-                }
-
-                lastX = cursorX;
-                lastY = cursorY;
-                renderCombinedScene();
-
-            } else if (currentGesture === 'move') {
-                updateHUD('move', 'Moving Written Text');
-                
-                if (lastX !== null && lastY !== null) {
-                    // Update offset vector shift using delta coordinates differences
-                    const dx = cursorX - lastX;
-                    const dy = cursorY - lastY;
-                    offsetX += dx;
-                    offsetY += dy;
-                }
-                
-                lastX = cursorX;
-                lastY = cursorY;
-                renderCombinedScene();
-
-            } else if (currentGesture === 'pause') {
-                updateHUD('pause', 'Paused (Fist)');
-                lastX = null;
-                lastY = null;
-            }
+        // Helper to check if a finger is extended
+        function isFingerExtended(tip, pip, mcp) {
+            return tip.y < pip.y && pip.y < mcp.y; 
         }
 
-        // Setup MediaPipe Configs
+        // Process MediaPipe Hand Results
+        function onResults(results) {
+            statusDiv.innerText = "Hand Not Detected";
+            
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                
+                // Get Key Landmark Coordinates (Mirrored X to match natural user movement)
+                const indexTip = { x: (1 - landmarks[8].x) * canvasElement.width, y: landmarks[8].y * canvasElement.height };
+                const indexPip = landmarks[7];
+                const indexMcp = landmarks[5];
+                
+                const middleTip = landmarks[12];
+                const middlePip = landmarks[11];
+                const middleMcp = landmarks[9];
+
+                const ringTip = landmarks[16];
+                const pinkyTip = landmarks[20];
+                const wrist = landmarks[0];
+
+                // Detect extended state for each finger
+                const indexExtended = isFingerExtended(landmarks[8], landmarks[6], landmarks[5]);
+                const middleExtended = isFingerExtended(landmarks[12], landmarks[10], landmarks[9]);
+                const ringExtended = isFingerExtended(landmarks[16], landmarks[14], landmarks[13]);
+                const pinkyExtended = isFingerExtended(landmarks[20], landmarks[18], landmarks[17]);
+
+                // Adjust tip coordinates to account for global canvas pan/offset
+                const adjustedTip = {
+                    x: indexTip.x - offsetX,
+                    y: indexTip.y - offsetY
+                };
+
+                // --- GESTURE LOGIC ---
+                
+                // 1. TWO FINGERS EXTENDED = MOVE MODE
+                if (indexExtended && middleExtended && !ringExtended && !pinkyExtended) {
+                    statusDiv.innerText = "Mode: Moving Canvas";
+                    statusDiv.style.color = "#ffcc00";
+                    statusDiv.style.textShadow = "0 0 8px rgba(255,204,0,0.6)";
+                    
+                    currentPath = null; // Close active drawing line
+                    
+                    if (!isMovingMode) {
+                        isMovingMode = true;
+                        lastMovePoint = indexTip;
+                    } else {
+                        // Drag the entire scene relative to tracking speed
+                        offsetX += (indexTip.x - lastMovePoint.x);
+                        offsetY += (indexTip.y - lastMovePoint.y);
+                        lastMovePoint = indexTip;
+                    }
+                } 
+                // 2. ONLY INDEX FINGER = DRAW MODE
+                else if (indexExtended && !middleExtended && !ringExtended && !pinkyExtended) {
+                    statusDiv.innerText = "Mode: Drawing";
+                    statusDiv.style.color = "#00ffcc";
+                    statusDiv.style.textShadow = "0 0 8px rgba(0,255,204,0.6)";
+                    isMovingMode = false;
+
+                    if (!currentPath || currentPath.isEraser) {
+                        currentPath = {
+                            color: colorPicker.value,
+                            size: parseInt(brushSizeSlider.value),
+                            isEraser: false,
+                            points: [adjustedTip]
+                        };
+                        paths.push(currentPath);
+                    } else {
+                        currentPath.points.push(adjustedTip);
+                    }
+                } 
+                // 3. ALL FINGERS EXTENDED = ERASER MODE
+                else if (indexExtended && middleExtended && ringExtended && pinkyExtended) {
+                    statusDiv.innerText = "Mode: Erasing";
+                    statusDiv.style.color = "#ff3366";
+                    statusDiv.style.textShadow = "0 0 8px rgba(255,51,102,0.6)";
+                    isMovingMode = false;
+
+                    if (!currentPath || !currentPath.isEraser) {
+                        currentPath = {
+                            color: '#121212',
+                            size: parseInt(brushSizeSlider.value) * 2, // Bigger eraser radius
+                            isEraser: true,
+                            points: [adjustedTip]
+                        };
+                        paths.push(currentPath);
+                    } else {
+                        currentPath.points.push(adjustedTip);
+                    }
+                } 
+                // 4. CLOSED FIST / OTHER = PAUSE MODE
+                else {
+                    statusDiv.innerText = "Mode: Paused";
+                    statusDiv.style.color = "#aaaaaa";
+                    statusDiv.style.textShadow = "none";
+                    isMovingMode = false;
+                    currentPath = null;
+                }
+            } else {
+                isMovingMode = false;
+                currentPath = null;
+            }
+
+            // Render updated paths framework
+            redrawCanvas();
+        }
+
+        // Configure MediaPipe Hands Pipeline
         const hands = new Hands({
             locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
         });
@@ -364,19 +335,24 @@
             minDetectionConfidence: 0.7,
             minTrackingConfidence: 0.7
         });
+
         hands.onResults(onResults);
 
+        // Fire up browser camera feed wrapper
         const camera = new Camera(videoElement, {
             onFrame: async () => {
                 await hands.send({ image: videoElement });
             },
-            width: 1280,
-            height: 720
+            width: 640,
+            height: 480
         });
         
         camera.start()
-            .then(() => { updateHUD('', 'Ready! Show your hand.'); })
-            .catch(err => { stateHUD.textContent = "Camera Error"; console.error(err); });
+            .then(() => statusDiv.innerText = "Ready! Show hand")
+            .catch(err => {
+                statusDiv.innerText = "Camera Error";
+                console.error(err);
+            });
     </script>
 </body>
 </html>
