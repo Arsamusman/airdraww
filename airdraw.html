@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neon Air Drawing App</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #0b0b12;
+            color: #fff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        #ui-container {
+            position: absolute;
+            top: 20px;
+            z-index: 10;
+            display: flex;
+            gap: 20px;
+            background: rgba(20, 20, 35, 0.7);
+            padding: 12px 24px;
+            border-radius: 50px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+            align-items: center;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        label {
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #8a8da4;
+        }
+
+        input[type="color"] {
+            border: none;
+            width: 35px;
+            height: 35px;
+            border-radius: 50%;
+            cursor: pointer;
+            background: none;
+        }
+
+        input[type="range"] {
+            accent-color: #00ffcc;
+            cursor: pointer;
+        }
+
+        #status-indicator {
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            background: #ff3366;
+            box-shadow: 0 0 10px rgba(255, 51, 102, 0.5);
+            transition: all 0.3s ease;
+        }
+
+        #canvas-container {
+            position: relative;
+            width: 100vw;
+            height: 100vw;
+            max-width: 800px;
+            max-height: 600px;
+            margin-top: 100px;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 0 40px rgba(0,0,0,0.8);
+        }
+
+        /* Mirror video and drawing canvas for natural interaction */
+        #webcam, #drawCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border-radius: 16px;
+            transform: rotateY(180deg);
+        }
+
+        #webcam {
+            object-fit: cover;
+            opacity: 0.15; /* Keeps camera view subtle underneath */
+            z-index: 1;
+        }
+
+        #drawCanvas {
+            z-index: 2;
+            background: transparent;
+        }
+
+        .clear-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+        .clear-btn:hover {
+            background: rgba(255, 51, 102, 0.2);
+            border-color: #ff3366;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-container">
+        <div class="control-group">
+            <label for="colorPicker">Color</label>
+            <input type="color" id="colorPicker" value="#00ffcc">
+        </div>
+        
+        <div class="control-group">
+            <label for="brushSize">Size</label>
+            <input type="range" id="brushSize" min="2" max="30" value="8">
+        </div>
+
+        <button class="clear-btn" id="clearBtn">Clear All</button>
+
+        <div id="status-indicator">Initializing...</div>
+    </div>
+
+    <div id="canvas-container">
+        <video id="webcam" autoplay playsinline></video>
+        <canvas id="drawCanvas" width="800" height="600"></canvas>
+    </div>
+
+    <script>
+        const videoElement = document.getElementById('webcam');
+        const canvasElement = document.getElementById('drawCanvas');
+        const ctx = canvasElement.getContext('2d');
+        const statusIndicator = document.getElementById('status-indicator');
+        const colorPicker = document.getElementById('colorPicker');
+        const brushSizeSlider = document.getElementById('brushSize');
+        const clearBtn = document.getElementById('clearBtn');
+
+        let lastX = null;
+        let lastY = null;
+        let currentMode = "PAUSE"; // DRAW, ERASE, PAUSE
+
+        // State Styling Configurations
+        const states = {
+            DRAW: { label: "Drawing", color: "#00ffcc", shadow: "rgba(0, 255, 204, 0.6)" },
+            ERASE: { label: "Erasing", color: "#ffcc00", shadow: "rgba(255, 204, 0, 0.6)" },
+            PAUSE: { label: "Paused", color: "#ff3366", shadow: "rgba(255, 51, 102, 0.6)" }
+        };
+
+        function updateStatus(mode) {
+            currentMode = mode;
+            statusIndicator.textContent = states[mode].label;
+            statusIndicator.style.backgroundColor = states[mode].color;
+            statusIndicator.style.boxShadow = `0 0 15px ${states[mode].shadow}`;
+        }
+
+        // Check if a finger is extended based on tip vs joint positions
+        function isFingerExtended(tip, pip, mcp) {
+            return tip.y < pip.y && pip.y < mcp.y;
+        }
+
+        function handleGestures(landmarks) {
+            // Landmark mappings for fingers
+            const thumbExtended = landmarks[4].x < landmarks[3].x; // Crude check, secondary here
+            const indexExtended = isFingerExtended(landmarks[8], landmarks[7], landmarks[5]);
+            const middleExtended = isFingerExtended(landmarks[12], landmarks[11], landmarks[9]);
+            const ringExtended = isFingerExtended(landmarks[16], landmarks[15], landmarks[13]);
+            const pinkyExtended = isFingerExtended(landmarks[20], landmarks[19], landmarks[17]);
+
+            // Count open fingers (excluding thumb for simplicity)
+            const extendedCount = [indexExtended, middleExtended, ringExtended, pinkyExtended].filter(Boolean).length;
+
+            // 1. CLOSED FIST: All major fingers down -> PAUSE
+            if (extendedCount === 0) {
+                return "PAUSE";
+            }
+            // 2. ONE FINGER: Only index finger up -> DRAW
+            else if (indexExtended && extendedCount === 1) {
+                return "DRAW";
+            }
+            // 3. OPEN PALM: Most or all fingers up -> ERASE
+            else if (extendedCount >= 3) {
+                return "ERASE";
+            }
+            
+            return currentMode; // Default to maintaining current mode during unstable states
+        }
+
+        function onResults(results) {
+            if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+                updateStatus("PAUSE");
+                lastX = null;
+                lastY = null;
+                return;
+            }
+
+            const landmarks = results.multiHandLandmarks[0];
+            const nextMode = handleGestures(landmarks);
+            updateStatus(nextMode);
+
+            // Track index finger tip coordinates (Landmark 8)
+            const indexTip = landmarks[8];
+            const x = indexTip.x * canvasElement.width;
+            const y = indexTip.y * canvasElement.height;
+
+            if (currentMode === "DRAW") {
+                if (lastX !== null && lastY !== null) {
+                    ctx.beginPath();
+                    ctx.moveTo(lastX, lastY);
+                    ctx.lineTo(x, y);
+                    
+                    // Setup Neon Glow Styles
+                    ctx.strokeStyle = colorPicker.value;
+                    ctx.lineWidth = brushSizeSlider.value;
+                    ctx.lineCap = 'round';
+                    ctx.lineJoin = 'round';
+                    
+                    // Shadow configurations create the neon emanation
+                    ctx.shadowBlur = brushSizeSlider.value * 1.5;
+                    ctx.shadowColor = colorPicker.value;
+                    
+                    ctx.stroke();
+                }
+                lastX = x;
+                lastY = y;
+            } 
+            else if (currentMode === "ERASE") {
+                // Circular clearing trail acting like an eraser
+                const eraseRadius = brushSizeSlider.value * 2.5;
+                ctx.save();
+                ctx.globalCompositeOperation = 'destination-out';
+                ctx.beginPath();
+                ctx.arc(x, y, eraseRadius, 0, Math.PI * 2, false);
+                ctx.fill();
+                ctx.restore();
+                
+                // Draw a temporary visual indicator for the eraser size
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(x, y, eraseRadius, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([4, 4]);
+                ctx.stroke();
+                ctx.restore();
+
+                lastX = null;
+                lastY = null;
+            } 
+            else { // PAUSE mode
+                lastX = null;
+                lastY = null;
+            }
+        }
+
+        // Initialize MediaPipe Hands setup
+        const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.7
+        });
+
+        hands.onResults(onResults);
+
+        // Start Camera tracking
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({ image: videoElement });
+            },
+            width: 800,
+            height: 600
+        });
+        
+        camera.start().then(() => {
+            updateStatus("PAUSE");
+        });
+
+        // UI Event Listeners
+        clearBtn.addEventListener('click', () => {
+            ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+        });
+    </script>
+</body>
+</html>
